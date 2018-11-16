@@ -10,6 +10,8 @@
 #include "Gcode.h"
 #include "Conveyor.h"
 #include "SpindleControl.h"
+#include "checksumm.h"
+#include "PublicDataRequest.h"
 
 void SpindleControl::on_gcode_received(void *argument) 
 {
@@ -70,4 +72,23 @@ void SpindleControl::on_halt(void *argument)
             turn_off();
         }
     }
+}
+
+// returns instance
+void SpindleControl::on_get_public_data(void* argument)
+{
+    PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
+
+    if(!pdr->starts_with(spindle_checksum)) return;
+    pdr->set_data_ptr(this);
+    pdr->set_taken();
+}
+
+std::string SpindleControl::get_spindle_status()
+{
+  if(spindle_on) {
+    return "M3";
+  } else {
+    return "M5";
+  }
 }

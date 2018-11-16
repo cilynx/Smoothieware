@@ -30,6 +30,9 @@
 #include "Configurator.h"
 #include "Block.h"
 
+#ifndef NO_TOOLS_SPINDLE
+#include "SpindleControl.h"
+#endif
 #include "TemperatureControlPublicAccess.h"
 #include "EndstopsPublicAccess.h"
 #include "NetworkPublicAccess.h"
@@ -835,7 +838,14 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
     } else if (what == "state") {
         // also $G
         // [G0 G54 G17 G21 G90 G94 M0 M5 M9 T0 F0.]
-        stream->printf("[G%d %s G%d G%d G%d G94 M0 M5 M9 T%d F%1.4f S%1.4f]\n",
+        string spindle_status = "M5";
+        #ifndef NO_TOOLS_SPINDLE
+        SpindleControl *spindle = nullptr;
+        if(PublicData::get_value(spindle_checksum, (void *)&spindle) && spindle != nullptr) {
+            spindle_status = spindle->get_spindle_status();
+        }
+        #endif
+        stream->printf("[G%d %s G%d G%d G%d G94 M0 %s M9 T%d F%1.4f S%1.4f]\n",
             THEKERNEL->gcode_dispatch->get_modal_command(),
             wcs2gcode(THEROBOT->get_current_wcs()).c_str(),
             THEROBOT->plane_axis_0 == X_AXIS && THEROBOT->plane_axis_1 == Y_AXIS && THEROBOT->plane_axis_2 == Z_AXIS ? 17 :
@@ -843,6 +853,7 @@ void SimpleShell::get_command( string parameters, StreamOutput *stream)
               THEROBOT->plane_axis_0 == Y_AXIS && THEROBOT->plane_axis_1 == Z_AXIS && THEROBOT->plane_axis_2 == X_AXIS ? 19 : 17,
             THEROBOT->inch_mode ? 20 : 21,
             THEROBOT->absolute_mode ? 90 : 91,
+            spindle_status.c_str(),
             get_active_tool(),
             THEROBOT->from_millimeters(THEROBOT->get_feed_rate()),
             THEROBOT->get_s_value());

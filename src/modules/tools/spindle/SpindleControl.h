@@ -10,19 +10,22 @@
 
 #include "libs/Module.h"
 
+#define spindle_checksum                   CHECKSUM("spindle")
+
 class SpindleControl: public Module {
     public:
         SpindleControl() {};
         virtual ~SpindleControl() {};
         virtual void on_module_loaded() {};
+        void on_get_public_data(void *argument);
+        void on_gcode_received(void *argument);
+        void on_halt(void *argument);
+        std::string get_spindle_status();
 
     protected:
         bool spindle_on;
 
     private:
-        void on_gcode_received(void *argument);
-        void on_halt(void *argument);
-        
         virtual void turn_on(void) {};
         virtual void turn_off(void) {};
         virtual void set_speed(int) {};
