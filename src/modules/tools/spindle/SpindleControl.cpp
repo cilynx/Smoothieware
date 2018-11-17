@@ -12,6 +12,7 @@
 #include "SpindleControl.h"
 #include "checksumm.h"
 #include "PublicDataRequest.h"
+#include "SpindlePublicAccess.h"
 
 void SpindleControl::on_gcode_received(void *argument) 
 {
@@ -74,21 +75,13 @@ void SpindleControl::on_halt(void *argument)
     }
 }
 
-// returns instance
 void SpindleControl::on_get_public_data(void* argument)
 {
-    PublicDataRequest* pdr = static_cast<PublicDataRequest*>(argument);
+    PublicDataRequest *pdr = static_cast<PublicDataRequest*>(argument);
 
     if(!pdr->starts_with(spindle_checksum)) return;
-    pdr->set_data_ptr(this);
-    pdr->set_taken();
-}
 
-std::string SpindleControl::get_spindle_status()
-{
-  if(spindle_on) {
-    return "M3";
-  } else {
-    return "M5";
-  }
+    struct pad_spindle *pad = static_cast<struct pad_spindle *>(pdr->get_data_ptr());
+    pad->is_on = spindle_on;
+    pdr->set_taken();
 }
