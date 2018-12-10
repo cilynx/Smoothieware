@@ -1624,6 +1624,12 @@ bool Robot::compute_arc(Gcode * gcode, const float target[], enum MOTION_MODE_T 
     float radius = 0.0F;
     float offset[3]{0,0,0};
 
+    // TODO: Support for other planes / coordinates
+    float x = gcode->get_value('X') - machine_position[X_AXIS]; // Delta x between current position and target
+    float y = gcode->get_value('Y') - machine_position[Y_AXIS]; // Delta y between current position and target
+    gcode->stream->printf("dX: %2.6f\r\n", x);
+    gcode->stream->printf("dY: %2.6f\r\n", y);
+
     // Center Format Arc
     for(char letter = 'I'; letter <= 'K'; letter++) {
         if( gcode->has_letter(letter) ) {
@@ -1638,11 +1644,20 @@ bool Robot::compute_arc(Gcode * gcode, const float target[], enum MOTION_MODE_T 
     }
 
     if( center_format ) {
-        // Calculate radius from center offset
+        // Calculate radius from center offset to current location
         radius = hypotf(offset[this->plane_axis_0], offset[this->plane_axis_1]);
-    }
 
-    if( gcode->has_letter('R') ) {
+        // TODO: Support for other planes / coordinates
+        x -= gcode->get_value('I'); // Delta x between circle center and target
+        y -= gcode->get_value('J'); // Delta y between circle center and target
+        float target_r = hypotf(x,y);
+        float delta_r = fabs(target_r - radius);
+        if( delta_r > 0.5 || (delta_r > 0.005 && delta_r > (0.001 * radius)) ) {
+            gcode->is_error= true;
+            gcode->txt_after_ok= "Invalid target (X,Y,Z) or center offset (I,J,K)";
+            return false;
+        }
+    } else if( gcode->has_letter('R') ) {
         // Radius Format Arc
 
         radius = this->to_millimeters(gcode->get_value('R'));
@@ -1650,23 +1665,11 @@ bool Robot::compute_arc(Gcode * gcode, const float target[], enum MOTION_MODE_T 
 
         // Calculate center offset from radius
 
-        // TODO: Support for other planes / coordinates
-        float x = gcode->get_value('X') - machine_position[X_AXIS];
-        float y = gcode->get_value('Y') - machine_position[Y_AXIS];
-
-        gcode->stream->printf("X1: %2.6f\r\n", gcode->get_value('X'));
-        gcode->stream->printf("Y1: %2.6f\r\n", gcode->get_value('Y'));
-        gcode->stream->printf("X0: %2.6f\r\n", machine_position[X_AXIS]);
-        gcode->stream->printf("Y0: %2.6f\r\n", machine_position[Y_AXIS]);
-        gcode->stream->printf("dX: %2.6f\r\n", gcode->get_value('X') - machine_position[X_AXIS]);
-        gcode->stream->printf("dY: %2.6f\r\n", gcode->get_value('Y') - machine_position[Y_AXIS]);
-
         float h_x2_div_d = 4.0F * radius*radius - x*x - y*y;
-        gcode->stream->printf("h_x2_div_d: %2.6f\r\n", h_x2_div_d);
 
         if( h_x2_div_d < 0 ) {
             gcode->is_error= true;
-            gcode->txt_after_ok= "Arc radius value is invalid";
+            gcode->txt_after_ok= "Invalid target (X, Y, Z) or radius (R)";
             return false;
         }
 
@@ -1692,6 +1695,7 @@ bool Robot::compute_arc(Gcode * gcode, const float target[], enum MOTION_MODE_T 
     }
 
     gcode->stream->printf("radius: %2.6f\r\n", radius);
+    gcode->stream->printf("offset: %2.6f, %2.6f, %2.6f\r\n", offset[0], offset[1], offset[2]);
 
     // Set clockwise/counter-clockwise sign for mc_arc computations
     bool is_clockwise = false;
