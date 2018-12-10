@@ -1624,6 +1624,11 @@ bool Robot::compute_arc(Gcode * gcode, const float target[], enum MOTION_MODE_T 
     float offset[3]{0,0,0};
     for(char letter = 'I'; letter <= 'K'; letter++) {
         if( gcode->has_letter(letter) ) {
+            if( gcode->has_letter('R') ) {
+                gcode->is_error= true;
+                gcode->txt_after_ok= "Radius (R) and center offset (I,J,K) cannot be used together";
+                return false;
+            }
             offset[letter - 'I'] = this->to_millimeters(gcode->get_value(letter));
         }
     }
