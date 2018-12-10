@@ -155,7 +155,7 @@ uint32_t ZProbe::read_probe(uint32_t dummy)
     // we check all axis as it maybe a G38.2 X10 for instance, not just a probe in Z
     if(STEPPER[X_AXIS]->is_moving() || STEPPER[Y_AXIS]->is_moving() || STEPPER[Z_AXIS]->is_moving()) {
         // if it is moving then we check the probe, and debounce it
-        if(this->pin.get()) {
+        if(this->pin.get() != invert_probe) {
             if(debounce < debounce_ms) {
                 debounce++;
             } else {
@@ -256,6 +256,7 @@ void ZProbe::on_gcode_received(void *argument)
 
     if( gcode->has_g && gcode->g >= 29 && gcode->g <= 32) {
 
+        invert_probe = false;
         // make sure the probe is defined and not already triggered before moving motors
         if(!this->pin.connected()) {
             gcode->stream->printf("ZProbe pin not configured.\n");
@@ -282,7 +283,7 @@ void ZProbe::on_gcode_received(void *argument)
 
             if(probe_result) {
                 // the result is in actuator coordinates moved
-                gcode->stream->printf("Z:%1.4f\n", mm);
+                gcode->stream->printf("Z:%1.4f\n", THEKERNEL->robot->from_millimeters(mm));
 
                 if(set_z) {
                     // set current Z to the specified value, shortcut for G92 Znnn
@@ -325,8 +326,8 @@ void ZProbe::on_gcode_received(void *argument)
 
     } else if(gcode->has_g && gcode->g == 38 ) { // G38.2 Straight Probe with error, G38.3 straight probe without error
         // linuxcnc/grbl style probe http://www.linuxcnc.org/docs/2.5/html/gcode/gcode.html#sec:G38-probe
-        if(gcode->subcode != 2 && gcode->subcode != 3) {
-            gcode->stream->printf("error:Only G38.2 and G38.3 are supported\n");
+        if(gcode->subcode < 2 || gcode->subcode > 5) {
+            gcode->stream->printf("error:Only G38.2 to G38.5 are supported\n");
             return;
         }
 
@@ -336,7 +337,7 @@ void ZProbe::on_gcode_received(void *argument)
             return;
         }
 
-        if(this->pin.get()) {
+        if(this->pin.get() ^ (gcode->subcode >= 4)) {
             gcode->stream->printf("error:ZProbe triggered before move, aborting command.\n");
             return;
         }
@@ -344,21 +345,33 @@ void ZProbe::on_gcode_received(void *argument)
         // first wait for all moves to finish
         THEKERNEL->conveyor->wait_for_idle();
 
+        float x= NAN, y=NAN, z=NAN;
         if(gcode->has_letter('X')) {
-            // probe in the X axis
-            probe_XYZ(gcode, X_AXIS);
-
-        }else if(gcode->has_letter('Y')) {
-            // probe in the Y axis
-            probe_XYZ(gcode, Y_AXIS);
-
-        }else if(gcode->has_letter('Z')) {
-            // probe in the Z axis
-            probe_XYZ(gcode, Z_AXIS);
-
-        }else{
-            gcode->stream->printf("error:at least one of X Y or Z must be specified\n");
+            x= gcode->get_value('X');
         }
+
+        if(gcode->has_letter('Y')) {
+            y= gcode->get_value('Y');
+        }
+
+        if(gcode->has_letter('Z')) {
+            z= gcode->get_value('Z');
+        }
+
+        if(isnan(x) && isnan(y) && isnan(z)) {
+            gcode->stream->printf("error:at least one of X Y or Z must be specified\n");
+            return;
+        }
+
+        if(gcode->subcode == 4 || gcode->subcode == 5) {
+            invert_probe = true;
+        } else {
+            invert_probe = false;
+        }
+
+        probe_XYZ(gcode, x, y, z);
+
+        invert_probe = false;
 
         return;
 
@@ -403,7 +416,7 @@ void ZProbe::on_gcode_received(void *argument)
 }
 
 // special way to probe in the X or Y or Z direction using planned moves, should work with any kinematics
-void ZProbe::probe_XYZ(Gcode *gcode, int axis)
+void ZProbe::probe_XYZ(Gcode *gcode, float x, float y, float z)
 {
     // enable the probe checking in the timer
     probing= true;
@@ -414,11 +427,7 @@ void ZProbe::probe_XYZ(Gcode *gcode, int axis)
     float rate = (gcode->has_letter('F')) ? gcode->get_value('F')/60 : this->slow_feedrate;
 
     // do a regular move which will stop as soon as the probe is triggered, or the distance is reached
-    switch(axis) {
-        case X_AXIS: coordinated_move(gcode->get_value('X'), 0, 0, rate, true); break;
-        case Y_AXIS: coordinated_move(0, gcode->get_value('Y'), 0, rate, true); break;
-        case Z_AXIS: coordinated_move(0, 0, gcode->get_value('Z'), rate, true); break;
-    }
+    coordinated_move(x, y, z, rate, true);
 
     // coordinated_move returns when the move is finished
 
@@ -435,11 +444,11 @@ void ZProbe::probe_XYZ(Gcode *gcode, int axis)
     uint8_t probeok= this->probe_detected ? 1 : 0;
 
     // print results using the GRBL format
-    gcode->stream->printf("[PRB:%1.3f,%1.3f,%1.3f:%d]\n", pos[X_AXIS], pos[Y_AXIS], pos[Z_AXIS], probeok);
+    gcode->stream->printf("[PRB:%1.3f,%1.3f,%1.3f:%d]\n", THEKERNEL->robot->from_millimeters(pos[X_AXIS]), THEKERNEL->robot->from_millimeters(pos[Y_AXIS]), THEKERNEL->robot->from_millimeters(pos[Z_AXIS]), probeok);
     THEROBOT->set_last_probe_position(std::make_tuple(pos[X_AXIS], pos[Y_AXIS], pos[Z_AXIS], probeok));
 
-    if(probeok == 0 && gcode->subcode == 2) {
-        // issue error if probe was not triggered and subcode == 2
+    if(probeok == 0 && (gcode->subcode == 2 || gcode->subcode == 4)) {
+        // issue error if probe was not triggered and subcode is 2 or 4
         gcode->stream->printf("ALARM: Probe fail\n");
         THEKERNEL->call_event(ON_HALT, nullptr);
     }
