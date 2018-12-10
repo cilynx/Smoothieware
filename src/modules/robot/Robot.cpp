@@ -1620,8 +1620,11 @@ bool Robot::append_arc(Gcode * gcode, const float target[], const float offset[]
 // Do the math for an arc and add it to the queue
 bool Robot::compute_arc(Gcode * gcode, const float target[], enum MOTION_MODE_T motion_mode)
 {
-    // Center Format Arc
+    bool center_format = false;
+    float radius = 0.0F;
     float offset[3]{0,0,0};
+
+    // Center Format Arc
     for(char letter = 'I'; letter <= 'K'; letter++) {
         if( gcode->has_letter(letter) ) {
             if( gcode->has_letter('R') ) {
@@ -1630,50 +1633,64 @@ bool Robot::compute_arc(Gcode * gcode, const float target[], enum MOTION_MODE_T 
                 return false;
             }
             offset[letter - 'I'] = this->to_millimeters(gcode->get_value(letter));
+            center_format = true;
         }
     }
 
-    // Radius Format Arc
+    if( center_format ) {
+        // Calculate radius from center offset
+        radius = hypotf(offset[this->plane_axis_0], offset[this->plane_axis_1]);
+    }
+
     if( gcode->has_letter('R') ) {
-        float r = this->to_millimeters(gcode->get_value('R'));
-        gcode->stream->printf("R: %2.6f\r\n", r);
+        // Radius Format Arc
 
-        int e = motion_mode == CCW_ARC ? 1 : -1;
-        gcode->stream->printf("e: %d\r\n", e);
+        radius = this->to_millimeters(gcode->get_value('R'));
+        gcode->stream->printf("R: %2.6f\r\n", radius);
 
-        float x0 = machine_position[X_AXIS];
-        float y0 = machine_position[Y_AXIS];
-        gcode->stream->printf("machine_position: X%2.6f Y%2.6f\r\n", x0, y0);
+        // Calculate center offset from radius
 
-        float x1 = x0;
-        if( gcode->has_letter('X') ) {
-            x1 = gcode->get_value('X');
+        // TODO: Support for other planes / coordinates
+        float x = gcode->get_value('X') - machine_position[X_AXIS];
+        float y = gcode->get_value('Y') - machine_position[Y_AXIS];
+
+        gcode->stream->printf("X1: %2.6f\r\n", gcode->get_value('X'));
+        gcode->stream->printf("Y1: %2.6f\r\n", gcode->get_value('Y'));
+        gcode->stream->printf("X0: %2.6f\r\n", machine_position[X_AXIS]);
+        gcode->stream->printf("Y0: %2.6f\r\n", machine_position[Y_AXIS]);
+        gcode->stream->printf("dX: %2.6f\r\n", gcode->get_value('X') - machine_position[X_AXIS]);
+        gcode->stream->printf("dY: %2.6f\r\n", gcode->get_value('Y') - machine_position[Y_AXIS]);
+
+        float h_x2_div_d = 4.0F * radius*radius - x*x - y*y;
+        gcode->stream->printf("h_x2_div_d: %2.6f\r\n", h_x2_div_d);
+
+        if( h_x2_div_d < 0 ) {
+            gcode->is_error= true;
+            gcode->txt_after_ok= "Arc radius value is invalid";
+            return false;
         }
 
-        float y1 = y0;
-        if( gcode->has_letter('Y') ) {
-            y1 = gcode->get_value('Y');
+        h_x2_div_d = -sqrt(h_x2_div_d)/hypotf(x,y);
+
+        if( motion_mode == CCW_ARC ) {
+            h_x2_div_d = -h_x2_div_d;
         }
 
-        gcode->stream->printf("target: X%2.6f Y%2.6f\r\n", x1, y1);
+        if( radius < 0 ) {
+            h_x2_div_d = -h_x2_div_d;
+            radius = -radius;
+        }
 
-        float d = sqrtf(powf(x1-x0,2)+powf(y1-y0,2));
-        gcode->stream->printf("d: %2.6f\r\n", d);
-
-        float u = (x1-x0)/d;
-        float v = (y1-y0)/d;
-        gcode->stream->printf("u,v: %2.6f, %2.6f\r\n", u, v);
-
-        float h = sqrtf(pow(r,2)-pow(d,2)/4);
-        gcode->stream->printf("h: %2.6f\r\n", h);
-
-        offset[0] = (x0+x1)/2-e*h*v - x0;
-        offset[1] = (y0+y1)/2+e*h*u - y0;
-        gcode->stream->printf("offset: %2.6f, %2.6f, %2.6f\r\n", offset[0], offset[1], offset[2]);
+        // TODO: Support for other planes / coordinates
+        offset[0] = 0.5*(x-(y*h_x2_div_d));
+        offset[1] = 0.5*(y+(x*h_x2_div_d));
+    } else {
+        // Didn't get R or I,J,K
+        gcode->is_error= true;
+        gcode->txt_after_ok= "G2/G3 require radius (R) or center offset (I,J,K)";
+        return false;
     }
 
-    // Find the radius
-    float radius = hypotf(offset[this->plane_axis_0], offset[this->plane_axis_1]);
     gcode->stream->printf("radius: %2.6f\r\n", radius);
 
     // Set clockwise/counter-clockwise sign for mc_arc computations
