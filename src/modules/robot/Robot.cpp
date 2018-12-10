@@ -962,53 +962,6 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
         }
     }
 
-    // Center Format Arc
-    float offset[3]{0,0,0};
-    for(char letter = 'I'; letter <= 'K'; letter++) {
-        if( gcode->has_letter(letter) ) {
-            offset[letter - 'I'] = this->to_millimeters(gcode->get_value(letter));
-        }
-    }
-
-    // Radius Format Arc
-    if( gcode->has_letter('R') ) {
-       float r = this->to_millimeters(gcode->get_value('R'));
-       gcode->stream->printf("R: %2.6f\r\n", r);
-
-       int e = motion_mode == CCW_ARC ? 1 : -1;
-       gcode->stream->printf("e: %d\r\n", e);
-
-       float x0 = machine_position[X_AXIS];
-       float y0 = machine_position[Y_AXIS];
-       gcode->stream->printf("machine_position: X%2.6f Y%2.6f\r\n", x0, y0);
-
-       float x1 = x0;
-       if( gcode->has_letter('X') ) {
-          x1 = gcode->get_value('X');
-       }
-
-       float y1 = y0;
-       if( gcode->has_letter('Y') ) {
-          y1 = gcode->get_value('Y');
-       }
-
-       gcode->stream->printf("target: X%2.6f Y%2.6f\r\n", x1, y1);
-
-       float d = sqrtf(powf(x1-x0,2)+powf(y1-y0,2));
-       gcode->stream->printf("d: %2.6f\r\n", d);
-
-       float u = (x1-x0)/d;
-       float v = (y1-y0)/d;
-       gcode->stream->printf("u,v: %2.6f, %2.6f\r\n", u, v);
-
-       float h = sqrtf(pow(r,2)-pow(d,2)/4);
-       gcode->stream->printf("h: %2.6f\r\n", h);
-
-       offset[0] = (x0+x1)/2-e*h*v - x0;
-       offset[1] = (y0+y1)/2+e*h*u - y0;
-       gcode->stream->printf("offset: %2.6f, %2.6f, %2.6f\r\n", offset[0], offset[1], offset[2]);
-    }
-
     // calculate target in machine coordinates (less compensation transform which needs to be done after segmentation)
     float target[n_motors];
     memcpy(target, machine_position, n_motors*sizeof(float));
@@ -1104,7 +1057,7 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
         case CW_ARC:
         case CCW_ARC:
             // Note arcs are not currently supported by extruder based machines, as 3D slicers do not use arcs (G2/G3)
-            moved= this->compute_arc(gcode, offset, target, motion_mode);
+            moved= this->compute_arc(gcode, target, motion_mode);
             break;
     }
 
@@ -1665,8 +1618,54 @@ bool Robot::append_arc(Gcode * gcode, const float target[], const float offset[]
 }
 
 // Do the math for an arc and add it to the queue
-bool Robot::compute_arc(Gcode * gcode, const float offset[], const float target[], enum MOTION_MODE_T motion_mode)
+bool Robot::compute_arc(Gcode * gcode, const float target[], enum MOTION_MODE_T motion_mode)
 {
+    // Center Format Arc
+    float offset[3]{0,0,0};
+    for(char letter = 'I'; letter <= 'K'; letter++) {
+        if( gcode->has_letter(letter) ) {
+            offset[letter - 'I'] = this->to_millimeters(gcode->get_value(letter));
+        }
+    }
+
+    // Radius Format Arc
+    if( gcode->has_letter('R') ) {
+        float r = this->to_millimeters(gcode->get_value('R'));
+        gcode->stream->printf("R: %2.6f\r\n", r);
+
+        int e = motion_mode == CCW_ARC ? 1 : -1;
+        gcode->stream->printf("e: %d\r\n", e);
+
+        float x0 = machine_position[X_AXIS];
+        float y0 = machine_position[Y_AXIS];
+        gcode->stream->printf("machine_position: X%2.6f Y%2.6f\r\n", x0, y0);
+
+        float x1 = x0;
+        if( gcode->has_letter('X') ) {
+            x1 = gcode->get_value('X');
+        }
+
+        float y1 = y0;
+        if( gcode->has_letter('Y') ) {
+            y1 = gcode->get_value('Y');
+        }
+
+        gcode->stream->printf("target: X%2.6f Y%2.6f\r\n", x1, y1);
+
+        float d = sqrtf(powf(x1-x0,2)+powf(y1-y0,2));
+        gcode->stream->printf("d: %2.6f\r\n", d);
+
+        float u = (x1-x0)/d;
+        float v = (y1-y0)/d;
+        gcode->stream->printf("u,v: %2.6f, %2.6f\r\n", u, v);
+
+        float h = sqrtf(pow(r,2)-pow(d,2)/4);
+        gcode->stream->printf("h: %2.6f\r\n", h);
+
+        offset[0] = (x0+x1)/2-e*h*v - x0;
+        offset[1] = (y0+y1)/2+e*h*u - y0;
+        gcode->stream->printf("offset: %2.6f, %2.6f, %2.6f\r\n", offset[0], offset[1], offset[2]);
+    }
 
     // Find the radius
     float radius = hypotf(offset[this->plane_axis_0], offset[this->plane_axis_1]);
