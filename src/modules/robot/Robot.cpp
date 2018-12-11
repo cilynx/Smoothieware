@@ -962,13 +962,6 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
         }
     }
 
-    float offset[3]{0,0,0};
-    for(char letter = 'I'; letter <= 'K'; letter++) {
-        if( gcode->has_letter(letter) ) {
-            offset[letter - 'I'] = this->to_millimeters(gcode->get_value(letter));
-        }
-    }
-
     // calculate target in machine coordinates (less compensation transform which needs to be done after segmentation)
     float target[n_motors];
     memcpy(target, machine_position, n_motors*sizeof(float));
@@ -1064,7 +1057,7 @@ void Robot::process_move(Gcode *gcode, enum MOTION_MODE_T motion_mode)
         case CW_ARC:
         case CCW_ARC:
             // Note arcs are not currently supported by extruder based machines, as 3D slicers do not use arcs (G2/G3)
-            moved= this->compute_arc(gcode, offset, target, motion_mode);
+            moved= this->compute_arc(gcode, target, motion_mode);
             break;
     }
 
@@ -1508,7 +1501,6 @@ bool Robot::append_arc(Gcode * gcode, const float target[], const float offset[]
         // CCW angle between position and target from circle center. Only one atan2() trig computation required.
         // Only run if not a full circle or angular travel will incorrectly result in 0.0f
         angular_travel = atan2f(r_axis0 * rt_axis1 - r_axis1 * rt_axis0, r_axis0 * rt_axis0 + r_axis1 * rt_axis1);
-        if (plane_axis_2 == Y_AXIS) { is_clockwise = !is_clockwise; }  //Math for XZ plane is reverse of other 2 planes
         if (is_clockwise) { // adjust angular_travel to be in the range of -2pi to 0 for clockwise arcs
            if (angular_travel > 0) { angular_travel -= (2 * PI); }
         } else {  // adjust angular_travel to be in the range of 0 to 2pi for counterclockwise arcs
@@ -1625,11 +1617,100 @@ bool Robot::append_arc(Gcode * gcode, const float target[], const float offset[]
 }
 
 // Do the math for an arc and add it to the queue
-bool Robot::compute_arc(Gcode * gcode, const float offset[], const float target[], enum MOTION_MODE_T motion_mode)
+bool Robot::compute_arc(Gcode * gcode, const float target[], enum MOTION_MODE_T motion_mode)
 {
+    bool center_format = false;
+    float radius = 0.0F, x = 0.0F, y = 0.0F;
+    float offset[3]{0,0,0};
 
-    // Find the radius
-    float radius = hypotf(offset[this->plane_axis_0], offset[this->plane_axis_1]);
+    if( gcode->has_letter('X' + this->plane_axis_0) ) {
+        x = to_millimeters(gcode->get_value('X' + this->plane_axis_0)) - machine_position[this->plane_axis_0];
+        // Delta x between current position and target
+        gcode->stream->printf("X1: %2.6f\r\n", to_millimeters(gcode->get_value('X' + this->plane_axis_0)));
+    }
+    if( gcode->has_letter('X' + this->plane_axis_1) ) {
+        y = to_millimeters(gcode->get_value('X' + this->plane_axis_1)) - machine_position[this->plane_axis_1];
+        // Delta y between current position and target
+        gcode->stream->printf("Y1: %2.6f\r\n", to_millimeters(gcode->get_value('X' + this->plane_axis_1)));
+    }
+
+    gcode->stream->printf("X0: %2.6f\r\n", machine_position[this->plane_axis_0]);
+    gcode->stream->printf("Y0: %2.6f\r\n", machine_position[this->plane_axis_1]);
+    gcode->stream->printf("dX: %2.6f\r\n", x);
+    gcode->stream->printf("dY: %2.6f\r\n", y);
+
+    // Center Format Arc
+    for(char letter = 'I'; letter <= 'K'; letter++) {
+        if( gcode->has_letter(letter) ) {
+            if( gcode->has_letter('R') ) {
+                gcode->is_error= true;
+                gcode->txt_after_ok= "Radius (R) and center offset (I,J,K) cannot be used together";
+                return false;
+            }
+            offset[letter - 'I'] = this->to_millimeters(gcode->get_value(letter));
+            center_format = true;
+        }
+    }
+
+    if( center_format ) {
+        // Calculate radius from center offset to current location
+        radius = hypotf(offset[this->plane_axis_0], offset[this->plane_axis_1]);
+
+        if( gcode->has_letter('I' + this->plane_axis_2) ) {
+            gcode->is_error= true;
+            char buf[64];
+            int n = snprintf(buf, sizeof(buf), "Invalid offset (%c) is not in the selected plane (G%i)", 'I' + this->plane_axis_2, 19-this->plane_axis_2);
+            gcode->txt_after_ok.append(buf, n);
+            return false;
+        }
+
+        x -= to_millimeters(gcode->get_value('I' + this->plane_axis_0)); // Delta x between circle center and target
+        y -= to_millimeters(gcode->get_value('I' + this->plane_axis_1)); // Delta y between circle center and target
+        float target_r = hypotf(x,y);
+        float delta_r = fabs(target_r - radius);
+        if( delta_r > 0.5 || (delta_r > 0.005 && delta_r > (0.001 * radius)) ) {
+            gcode->is_error= true;
+            gcode->txt_after_ok= "Invalid target (X,Y,Z) or center offset (I,J,K)";
+            return false;
+        }
+    } else if( gcode->has_letter('R') ) {
+        // Radius Format Arc
+
+        radius = this->to_millimeters(gcode->get_value('R'));
+        gcode->stream->printf("R: %2.6f\r\n", radius);
+
+        // Calculate center offset from radius
+
+        float h_x2_div_d = 4.0F * radius*radius - x*x - y*y;
+
+        if( h_x2_div_d < 0 ) {
+            gcode->is_error= true;
+            gcode->txt_after_ok= "Invalid target (X, Y, Z) or radius (R)";
+            return false;
+        }
+
+        h_x2_div_d = -sqrt(h_x2_div_d)/hypotf(x,y);
+
+        if( motion_mode == CCW_ARC ) {
+            h_x2_div_d = -h_x2_div_d;
+        }
+
+        if( radius < 0 ) {
+            h_x2_div_d = -h_x2_div_d;
+            radius = -radius;
+        }
+
+        offset[this->plane_axis_0] = 0.5*(x-(y*h_x2_div_d));
+        offset[this->plane_axis_1] = 0.5*(y+(x*h_x2_div_d));
+    } else {
+        // Didn't get R or I,J,K
+        gcode->is_error= true;
+        gcode->txt_after_ok= "G2/G3 require radius (R) or a center offset (I,J,K) in the selected plane (G17, G18, G19)";
+        return false;
+    }
+
+    gcode->stream->printf("radius: %2.6f\r\n", radius);
+    gcode->stream->printf("offset: %2.6f, %2.6f, %2.6f\r\n", offset[0], offset[1], offset[2]);
 
     // Set clockwise/counter-clockwise sign for mc_arc computations
     bool is_clockwise = false;
