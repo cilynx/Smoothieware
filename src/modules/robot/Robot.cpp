@@ -1624,8 +1624,8 @@ bool Robot::compute_arc(Gcode * gcode, const float target[], enum MOTION_MODE_T 
     float radius = 0.0F;
     float offset[3]{0,0,0};
 
-    float x = gcode->get_value('X' + this->plane_axis_0) - machine_position[this->plane_axis_0]; // Delta x between current position and target
-    float y = gcode->get_value('X' + this->plane_axis_1) - machine_position[this->plane_axis_1]; // Delta y between current position and target
+    float x = to_millimeters(gcode->get_value('X' + this->plane_axis_0)) - machine_position[this->plane_axis_0]; // Delta x between current position and target
+    float y = to_millimeters(gcode->get_value('X' + this->plane_axis_1)) - machine_position[this->plane_axis_1]; // Delta y between current position and target
     gcode->stream->printf("dX: %2.6f\r\n", x);
     gcode->stream->printf("dY: %2.6f\r\n", y);
 
@@ -1654,8 +1654,8 @@ bool Robot::compute_arc(Gcode * gcode, const float target[], enum MOTION_MODE_T 
             return false;
         }
 
-        x -= gcode->get_value('I' + this->plane_axis_0); // Delta x between circle center and target
-        y -= gcode->get_value('I' + this->plane_axis_1); // Delta y between circle center and target
+        x -= to_millimeters(gcode->get_value('I' + this->plane_axis_0)); // Delta x between circle center and target
+        y -= to_millimeters(gcode->get_value('I' + this->plane_axis_1)); // Delta y between circle center and target
         float target_r = hypotf(x,y);
         float delta_r = fabs(target_r - radius);
         if( delta_r > 0.5 || (delta_r > 0.005 && delta_r > (0.001 * radius)) ) {
