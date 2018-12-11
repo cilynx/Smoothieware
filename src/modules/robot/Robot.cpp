@@ -1501,7 +1501,6 @@ bool Robot::append_arc(Gcode * gcode, const float target[], const float offset[]
         // CCW angle between position and target from circle center. Only one atan2() trig computation required.
         // Only run if not a full circle or angular travel will incorrectly result in 0.0f
         angular_travel = atan2f(r_axis0 * rt_axis1 - r_axis1 * rt_axis0, r_axis0 * rt_axis0 + r_axis1 * rt_axis1);
-        if (plane_axis_2 == Y_AXIS) { is_clockwise = !is_clockwise; }  //Math for XZ plane is reverse of other 2 planes
         if (is_clockwise) { // adjust angular_travel to be in the range of -2pi to 0 for clockwise arcs
            if (angular_travel > 0) { angular_travel -= (2 * PI); }
         } else {  // adjust angular_travel to be in the range of 0 to 2pi for counterclockwise arcs
