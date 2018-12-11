@@ -1646,6 +1646,14 @@ bool Robot::compute_arc(Gcode * gcode, const float target[], enum MOTION_MODE_T 
         // Calculate radius from center offset to current location
         radius = hypotf(offset[this->plane_axis_0], offset[this->plane_axis_1]);
 
+        if( gcode->has_letter('I' + this->plane_axis_2) ) {
+            gcode->is_error= true;
+            char buf[64];
+            int n = snprintf(buf, sizeof(buf), "Invalid offset (%c) is not in the selected plane (G%i)", 'I' + this->plane_axis_2, 19-this->plane_axis_2);
+            gcode->txt_after_ok.append(buf, n);
+            return false;
+        }
+
         x -= gcode->get_value('I' + this->plane_axis_0); // Delta x between circle center and target
         y -= gcode->get_value('I' + this->plane_axis_1); // Delta y between circle center and target
         float target_r = hypotf(x,y);
@@ -1687,7 +1695,7 @@ bool Robot::compute_arc(Gcode * gcode, const float target[], enum MOTION_MODE_T 
     } else {
         // Didn't get R or I,J,K
         gcode->is_error= true;
-        gcode->txt_after_ok= "G2/G3 require radius (R) or center offset (I,J,K)";
+        gcode->txt_after_ok= "G2/G3 require radius (R) or a center offset (I,J,K) in the selected plane (G17, G18, G19)";
         return false;
     }
 
