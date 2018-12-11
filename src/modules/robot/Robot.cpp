@@ -1621,11 +1621,22 @@ bool Robot::append_arc(Gcode * gcode, const float target[], const float offset[]
 bool Robot::compute_arc(Gcode * gcode, const float target[], enum MOTION_MODE_T motion_mode)
 {
     bool center_format = false;
-    float radius = 0.0F;
+    float radius = 0.0F, x = 0.0F, y = 0.0F;
     float offset[3]{0,0,0};
 
-    float x = to_millimeters(gcode->get_value('X' + this->plane_axis_0)) - machine_position[this->plane_axis_0]; // Delta x between current position and target
-    float y = to_millimeters(gcode->get_value('X' + this->plane_axis_1)) - machine_position[this->plane_axis_1]; // Delta y between current position and target
+    if( gcode->has_letter('X' + this->plane_axis_0) ) {
+        x = to_millimeters(gcode->get_value('X' + this->plane_axis_0)) - machine_position[this->plane_axis_0];
+        // Delta x between current position and target
+        gcode->stream->printf("X1: %2.6f\r\n", to_millimeters(gcode->get_value('X' + this->plane_axis_0)));
+    }
+    if( gcode->has_letter('X' + this->plane_axis_1) ) {
+        y = to_millimeters(gcode->get_value('X' + this->plane_axis_1)) - machine_position[this->plane_axis_1];
+        // Delta y between current position and target
+        gcode->stream->printf("Y1: %2.6f\r\n", to_millimeters(gcode->get_value('X' + this->plane_axis_1)));
+    }
+
+    gcode->stream->printf("X0: %2.6f\r\n", machine_position[this->plane_axis_0]);
+    gcode->stream->printf("Y0: %2.6f\r\n", machine_position[this->plane_axis_1]);
     gcode->stream->printf("dX: %2.6f\r\n", x);
     gcode->stream->printf("dY: %2.6f\r\n", y);
 
