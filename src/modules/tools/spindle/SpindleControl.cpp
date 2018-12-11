@@ -10,6 +10,9 @@
 #include "Gcode.h"
 #include "Conveyor.h"
 #include "SpindleControl.h"
+#include "checksumm.h"
+#include "PublicDataRequest.h"
+#include "SpindlePublicAccess.h"
 
 void SpindleControl::on_gcode_received(void *argument) 
 {
@@ -70,4 +73,15 @@ void SpindleControl::on_halt(void *argument)
             turn_off();
         }
     }
+}
+
+void SpindleControl::on_get_public_data(void* argument)
+{
+    PublicDataRequest *pdr = static_cast<PublicDataRequest*>(argument);
+
+    if(!pdr->starts_with(spindle_checksum)) return;
+
+    struct pad_spindle *pad = static_cast<struct pad_spindle *>(pdr->get_data_ptr());
+    pad->is_on = spindle_on;
+    pdr->set_taken();
 }
